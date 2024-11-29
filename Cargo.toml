@@ -1,0 +1,9 @@
+[package]
+name = "d1x"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4.38"
+termcolor = "1.4.1"
+tokio = { version = "1.41.1", features = ["sync"] }
