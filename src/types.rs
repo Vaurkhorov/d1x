@@ -1,5 +1,5 @@
-use std::collections::HashMap;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 // 10 raised to the number of decimals to keep for prices.
 const PRICE_PRECISION_FACTOR: f64 = 1e2;
@@ -9,7 +9,7 @@ const NO_OF_PRICES_QUERIED: usize = 5;
 /// Holds details for a stock and its orders.
 pub struct Stock {
     /// The symbol of the stock (e.g., "ORT").
-    /// 
+    ///
     /// This is used for querying the stock, and so must be unique.
     symbol: String,
     /// The full name of the stock (e.g., "Orchard de Rosa et Tulipan")
@@ -19,7 +19,7 @@ pub struct Stock {
     /// Sell orders for the stock.
     sell_orders: Vec<Order>,
     /// Open, high, low, close prices for the stock.
-    ohlc: OHLC,
+    ohlc: Ohlc,
 }
 
 impl Stock {
@@ -30,7 +30,7 @@ impl Stock {
             name: name.to_string(),
             buy_orders: Vec::new(),
             sell_orders: Vec::new(),
-            ohlc: OHLC::new(),
+            ohlc: Ohlc::new(),
         }
     }
 
@@ -74,8 +74,14 @@ impl Stock {
             }
         }
 
-        let mut pricelist: Vec<(f64, usize)> = pricelist.iter().map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity)).collect();
-        pricelist.sort_by(|a, b| b.0.partial_cmp(&a.0).expect("prices are f64s and should be comparable."));
+        let mut pricelist: Vec<(f64, usize)> = pricelist
+            .iter()
+            .map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity))
+            .collect();
+        pricelist.sort_by(|a, b| {
+            b.0.partial_cmp(&a.0)
+                .expect("prices are f64s and should be comparable.")
+        });
         pricelist
     }
 
@@ -97,8 +103,14 @@ impl Stock {
             }
         }
 
-        let mut pricelist: Vec<(f64, usize)> = pricelist.iter().map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity)).collect();
-        pricelist.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("prices are f64s and should be comparable."));
+        let mut pricelist: Vec<(f64, usize)> = pricelist
+            .iter()
+            .map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity))
+            .collect();
+        pricelist.sort_by(|a, b| {
+            a.0.partial_cmp(&b.0)
+                .expect("prices are f64s and should be comparable.")
+        });
         pricelist
     }
 
@@ -133,7 +145,12 @@ impl Stock {
 
                     buy_order.resolve(quantity);
                     sell_order.resolve(quantity);
-                    trades.push(Trade::new(buy_order.creator_id, sell_order.creator_id, price, quantity));
+                    trades.push(Trade::new(
+                        buy_order.creator_id,
+                        sell_order.creator_id,
+                        price,
+                        quantity,
+                    ));
                     self.ohlc.update(price);
 
                     if buy_order.get_quantity() == 0 {
@@ -153,8 +170,16 @@ impl Stock {
 
     /// Sorts buy and sell orders by price.
     fn sort_orders(&mut self) {
-        self.buy_orders.sort_by(|a, b| b.price.partial_cmp(&a.price).expect("prices are f64s and should be comparable."));
-        self.sell_orders.sort_by(|a, b| a.price.partial_cmp(&b.price).expect("prices are f64s and should be comparable."));
+        self.buy_orders.sort_by(|a, b| {
+            b.price
+                .partial_cmp(&a.price)
+                .expect("prices are f64s and should be comparable.")
+        });
+        self.sell_orders.sort_by(|a, b| {
+            a.price
+                .partial_cmp(&b.price)
+                .expect("prices are f64s and should be comparable.")
+        });
     }
 
     /// Returns the open, high, low, close prices for the stock.
@@ -172,7 +197,7 @@ pub struct Order {
     /// The quantity of the order.
     quantity: usize,
     /// The time the order was created.
-    /// 
+    ///
     /// The price listed on the order that was created earlier is considered while resolving orders.
     time: DateTime<Utc>,
 }
@@ -247,16 +272,16 @@ impl Trade {
 }
 
 /// Open, high, low, close prices for a stock.
-pub struct OHLC {
+pub struct Ohlc {
     open: Option<f64>,
     high: Option<f64>,
     low: Option<f64>,
     close: Option<f64>,
 }
 
-impl OHLC {
+impl Ohlc {
     /// Creates a blank OHLC struct.
-    /// 
+    ///
     /// Values are all set to `None` until the first update.
     fn new() -> Self {
         Self {
@@ -291,7 +316,7 @@ pub enum Query {
     /// Post a sell order for the stock.
     Sell(String, Order),
     /// Query the OHLC prices for the stock.
-    OHLC(String),
+    Ohlc(String),
     /// Query the pending buy orders for the stock.
     BuyOrders(String),
     /// Query the pending sell orders for the stock.
@@ -304,12 +329,12 @@ pub enum QueryResponse {
     /// The order was successfully posted.
     OrderPosted,
     /// A vector of pending orders for the stock.
-    /// 
+    ///
     /// It contains a limited number of unique prices and their quantities. The number of unique prices is defined by `NO_OF_PRICES_QUERIED`.
     QueriedOrders(Vec<(f64, usize)>),
     /// The open, high, low, close prices for the stock.
-    OHLC(Option<f64>, Option<f64>, Option<f64>, Option<f64>),
-    
+    Ohlc(Option<f64>, Option<f64>, Option<f64>, Option<f64>),
+
     // Errors
     /// The symbol provided was not found.
     SymbolNotFound,
@@ -344,7 +369,7 @@ mod tests {
     /// Tests whether OHLC is updated correctly.
     #[test]
     fn test_ohlc_update() {
-        let mut ohlc = OHLC::new();
+        let mut ohlc = Ohlc::new();
         ohlc.update(150.0);
         ohlc.update(155.0);
         ohlc.update(145.0);
