@@ -56,7 +56,7 @@ impl Stock {
         self.sort_orders();
     }
 
-    /// Returns pending buy orders for the stock.
+    /// Returns pending buy orders for the stock, sorted in descending order of price.
     pub fn get_buy_orders(&self) -> Vec<(f64, usize)> {
         let mut pricelist = HashMap::<usize, usize>::new();
 
@@ -74,10 +74,12 @@ impl Stock {
             }
         }
 
-        pricelist.iter().map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity)).collect()
+        let mut pricelist: Vec<(f64, usize)> = pricelist.iter().map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity)).collect();
+        pricelist.sort_by(|a, b| b.0.partial_cmp(&a.0).expect("prices are f64s and should be comparable."));
+        pricelist
     }
 
-    /// Returns pending sell orders for the stock.
+    /// Returns pending sell orders for the stock, sorted in ascending order of price.
     pub fn get_sell_orders(&self) -> Vec<(f64, usize)> {
         let mut pricelist = HashMap::<usize, usize>::new();
 
@@ -95,7 +97,9 @@ impl Stock {
             }
         }
 
-        pricelist.iter().map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity)).collect()
+        let mut pricelist: Vec<(f64, usize)> = pricelist.iter().map(|(price, quantity)| ((*price as f64) / PRICE_PRECISION_FACTOR, *quantity)).collect();
+        pricelist.sort_by(|a, b| a.0.partial_cmp(&b.0).expect("prices are f64s and should be comparable."));
+        pricelist
     }
 
     /// Resolves trades between buy and sell orders.
@@ -309,4 +313,74 @@ pub enum QueryResponse {
     // Errors
     /// The symbol provided was not found.
     SymbolNotFound,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Tests trade resolution, checking the returned logs and stored pending orders.
+    #[test]
+    fn test_resolve_trade() {
+        let mut stock = Stock::new("ORT", "Orchard de Rosa et Tulipan");
+        let buy_order = Order::new(1, 150.5, 10);
+        let sell_order = Order::new(2, 150.0, 5);
+
+        stock.add_buy_order(buy_order);
+        stock.add_sell_order(sell_order);
+
+        let trades = stock.resolve();
+        assert_eq!(trades.len(), 1);
+        assert_eq!(trades[0].buyer_id, 1);
+        assert_eq!(trades[0].seller_id, 2);
+        assert_eq!(trades[0].price, 150.5);
+        assert_eq!(trades[0].quantity, 5);
+
+        // Verify remaining orders
+        assert_eq!(stock.get_buy_orders()[0].1, 5);
+        assert!(stock.get_sell_orders().is_empty());
+    }
+
+    /// Tests whether OHLC is updated correctly.
+    #[test]
+    fn test_ohlc_update() {
+        let mut ohlc = OHLC::new();
+        ohlc.update(150.0);
+        ohlc.update(155.0);
+        ohlc.update(145.0);
+        ohlc.update(148.0);
+
+        let (open, high, low, close) = ohlc.get();
+        assert_eq!(open, Some(150.0));
+        assert_eq!(high, Some(155.0));
+        assert_eq!(low, Some(145.0));
+        assert_eq!(close, Some(148.0));
+    }
+
+    /// Tests buy queries.
+    #[test]
+    fn test_query_buy_orders() {
+        let mut stock = Stock::new("ORT", "Orchard de Rosa et Tulipan");
+        stock.add_buy_order(Order::new(1, 150.0, 10));
+        stock.add_buy_order(Order::new(2, 155.0, 5));
+        stock.add_buy_order(Order::new(3, 150.0, 15));
+
+        let buy_orders = stock.get_buy_orders();
+        assert_eq!(buy_orders.len(), 2); // Only unique prices are kept
+        assert_eq!(buy_orders[0], (155.0, 5)); // Highest price first
+        assert_eq!(buy_orders[1], (150.0, 25)); // Combined quantities
+    }
+
+    #[test]
+    fn test_query_sell_orders() {
+        let mut stock = Stock::new("ORT", "Orchard de Rosa et Tulipan");
+        stock.add_sell_order(Order::new(1, 145.0, 10));
+        stock.add_sell_order(Order::new(2, 140.0, 5));
+        stock.add_sell_order(Order::new(3, 145.0, 15));
+
+        let sell_orders = stock.get_sell_orders();
+        assert_eq!(sell_orders.len(), 2); // Only unique prices are kept
+        assert_eq!(sell_orders[0], (140.0, 5)); // Lowest price first
+        assert_eq!(sell_orders[1], (145.0, 25)); // Combined quantities
+    }
 }
