@@ -1,13 +1,14 @@
 mod types;
 
 use std::collections::HashMap;
+use std::env;
 use termcolor::{Color, ColorChoice, ColorSpec, StandardStream, WriteColor};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, watch};
 use tokio::sync::mpsc::error::SendError;
 use tokio::{select, signal, task, time};
-use types::{Query, QueryResponse, Stock};
+use types::{Market, Query, QueryResponse, Stock};
 
 const TICK_INTERVAL_MILLISECS: u64 = 10;
 const MARKET_OUTPUT_COLOUR: Color = Color::Yellow;
@@ -18,33 +19,43 @@ async fn main() {
 
     let (server_tx, mut market_rx) = mpsc::channel::<(usize, Query)>(32);
 
-    let mut stocks: HashMap<String, Stock> = HashMap::new();
-    let mut initial_stocks = vec![Stock::new("V", "Vulyenne")];
+    let mut market = Market::new();
+    let initial_stocks = vec![Stock::new("V", "Vulyenne")];
+    market.extend_stocks(initial_stocks.into_iter());
 
     let mut tick_interval = time::interval(time::Duration::from_millis(TICK_INTERVAL_MILLISECS));
     tick_interval.set_missed_tick_behavior(time::MissedTickBehavior::Skip);
 
-    while let Some(stock) = initial_stocks.pop() {
-        stocks.insert(stock.get_symbol().to_string(), stock);
+    let mut cmd_args = env::args();
+    let mut listener_address = String::from("127.0.0.1:8080");
+
+    while let Some(arg) = cmd_args.next() {
+        if arg == "-p" {
+            if let Some(url) = cmd_args.next() {
+                listener_address = url;
+            }
+        }
     }
 
     // a unique ID is mapped to each connection
     let mut connections: HashMap<usize, mpsc::Sender<QueryResponse>> = HashMap::new();
-    let server = task::spawn(serve(server_tx));
+    market_speak(format!("Starting server at {}. Press Ctrl+C to shut down.", &listener_address), &mut stdout, false);
+    let server = task::spawn(serve(server_tx, listener_address));
 
     'market_loop: loop {
         tick_interval.tick().await;
         loop {
-            for stock in stocks.values_mut() {
-                let executed_trades = stock.resolve();
-                for trade in executed_trades {
+            let executed_trades = market.resolve();
+
+            for (symbol, trades) in executed_trades.into_iter() {
+                for trade in trades.into_iter() {
                     market_speak(
-                        format!("Market says> Trade executed for {}: {:#?}", stock.get_name(), &trade),
+                        format!("Market says> Trade executed for {}: {:#?}", symbol, &trade),
                         &mut stdout,
                         false,
                     );
 
-                    if let Some(buyer_tx) = connections.get(&trade.get_buyer_id()) {
+                    if let Some(buyer_tx) = connections.get(&trade.buyer_id) {
                         if let Err(e) = buyer_tx.send(QueryResponse::ExecutedTrade(trade)).await {
                             market_speak(
                                 format!("Error while sending trade to buyer: {:#?}", e),
@@ -54,13 +65,13 @@ async fn main() {
                         }
                     } else {
                         market_speak(
-                            format!("Buyer with id {} not connected.", trade.get_buyer_id()),
+                            format!("Buyer with id {} not connected.", trade.buyer_id),
                             &mut stdout,
                             true,
                         );
                     }
 
-                    if let Some(seller_tx) = connections.get(&trade.get_seller_id()) {
+                    if let Some(seller_tx) = connections.get(&trade.seller_id) {
                         if let Err(e) = seller_tx.send(QueryResponse::ExecutedTrade(trade)).await {
                             market_speak(
                                 format!("Error while sending trade to seller: {:#?}", e),
@@ -70,7 +81,7 @@ async fn main() {
                         }
                     } else {
                         market_speak(
-                            format!("Seller with id {} not connected.", trade.get_seller_id()),
+                            format!("Seller with id {} not connected.", trade.seller_id),
                             &mut stdout,
                             true,
                         );
@@ -80,7 +91,7 @@ async fn main() {
 
             match market_rx.try_recv() {
                 Ok((id, query)) => {
-                    let status = resolve_query(id, query, &mut connections, &mut stocks, &mut stdout).await;
+                    let status = resolve_query(id, query, &mut connections, &mut market, &mut stdout).await;
                     if let Err(e) = status {
                         market_speak(format!("Error: {:#?}", e), &mut stdout, true);
                     }
@@ -103,7 +114,7 @@ async fn main() {
     }
 }
 
-async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize, mpsc::Sender<QueryResponse>>, stocks: &mut HashMap<String, Stock>, stdout: &mut StandardStream) -> Result<(), SendError<QueryResponse>> {
+async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize, mpsc::Sender<QueryResponse>>, market: &mut Market, stdout: &mut StandardStream) -> Result<(), SendError<QueryResponse>> {
     // If there is a new connection, add it, otherwise check if the ID exists first.
     let socket_tx = match query {
         Query::Connect(socket_tx) => {
@@ -128,7 +139,7 @@ async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize,
             unreachable!("Connection should already have been handled.");
         }
         Query::Buy(symbol, order) => {
-            if let Some(stock) = stocks.get_mut(&symbol) {
+            if let Some(stock) = market.get_stock_mut(&symbol) {
                 stock.add_buy_order(order);
                 socket_tx.send(QueryResponse::OrderPosted).await?;
             } else {
@@ -136,7 +147,7 @@ async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize,
             }
         }
         Query::Sell(symbol, order) => {
-            if let Some(stock) = stocks.get_mut(&symbol) {
+            if let Some(stock) = market.get_stock_mut(&symbol) {
                 stock.add_sell_order(order);
                 socket_tx.send(QueryResponse::OrderPosted).await?;
             } else {
@@ -144,7 +155,7 @@ async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize,
             }
         }
         Query::Ohlc(symbol) => {
-            if let Some(stock) = stocks.get(&symbol) {
+            if let Some(stock) = market.get_stock(&symbol) {
                 let (open, high, low, close) = stock.get_ohlc();
                 socket_tx.send(QueryResponse::Ohlc(open, high, low, close)).await?;
             } else {
@@ -152,14 +163,14 @@ async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize,
             }
         }
         Query::BuyOrders(symbol) => {
-            if let Some(stock) = stocks.get(&symbol) {
+            if let Some(stock) = market.get_stock(&symbol) {
                 socket_tx.send(QueryResponse::QueriedOrders(stock.get_buy_orders())).await?;
             } else {
                 socket_tx.send(QueryResponse::SymbolNotFound).await?;
             }
         }
         Query::SellOrders(symbol) => {
-            if let Some(stock) = stocks.get(&symbol) {
+            if let Some(stock) = market.get_stock(&symbol) {
                 socket_tx.send(QueryResponse::QueriedOrders(stock.get_sell_orders())).await?;
             } else {
                 socket_tx.send(QueryResponse::SymbolNotFound).await?;
@@ -195,11 +206,11 @@ fn market_speak(message: String, stdout: &mut StandardStream, error: bool) {
     }
 }
 
-pub async fn serve(tx: mpsc::Sender<(usize, Query)>) -> Result<(), std::io::Error> {
+pub async fn serve(tx: mpsc::Sender<(usize, Query)>, listener_address: String) -> Result<(), std::io::Error> {
     let mut next_id = 1;
     let mut connection_future_set = task::JoinSet::new();
     
-    let listener = TcpListener::bind("127.0.0.1:8080").await?;
+    let listener = TcpListener::bind(listener_address).await?;
 
     let (shutdown_signal_tx, shutdown_signal_rx) = watch::channel(false);
         
