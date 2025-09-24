@@ -9,7 +9,7 @@ pub use user::*;
 use std::collections::HashMap;
 
 pub struct Market {
-    stocks: HashMap<String, Stock>,
+    stocks: HashMap<Symbol, Stock>,
     users: HashMap<usize, User>
 }
 
@@ -18,15 +18,15 @@ impl Market {
         Self { stocks: HashMap::new(), users: HashMap::new() }
     }
 
-    pub fn add_stock(&mut self, stock: Stock) {
-        self.stocks.insert(stock.get_name().to_owned(), stock);
+    pub fn add_stock(&mut self, symbol: Symbol, stock: Stock) {
+        self.stocks.insert(symbol, stock);
     }
 
     pub fn extend_stocks<I>(&mut self, stocks: I)
     where
-        I: Iterator<Item = Stock>
+        I: IntoIterator<Item = (Symbol, Stock)>
     {
-        self.stocks.extend(stocks.map(|s| (s.get_name().to_owned(), s)));        
+        self.stocks.extend(stocks);        
     }
 
     pub fn resolve(&mut self) -> Vec<(String, Vec<Trade>)> {
@@ -39,11 +39,11 @@ impl Market {
         executed_trades
     }
 
-    pub fn get_stock(&self, symbol: &str) -> Option<&Stock> {
+    pub fn get_stock(&self, symbol: &Symbol) -> Option<&Stock> {
         self.stocks.get(symbol)
     }
 
-    pub fn get_stock_mut(&mut self, symbol: &str) -> Option<&mut Stock> {
+    pub fn get_stock_mut(&mut self, symbol: &Symbol) -> Option<&mut Stock> {
         self.stocks.get_mut(symbol)
     }
 }

@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, watch};
 use tokio::sync::mpsc::error::SendError;
 use tokio::{select, signal, task, time};
-use types::{Market, Query, QueryResponse, Stock};
+use types::{Market, Query, QueryResponse, Stock, Symbol};
 
 const TICK_INTERVAL_MILLISECS: u64 = 10;
 const MARKET_OUTPUT_COLOUR: Color = Color::Yellow;
@@ -20,7 +20,7 @@ async fn main() {
     let (server_tx, mut market_rx) = mpsc::channel::<(usize, Query)>(32);
 
     let mut market = Market::new();
-    let initial_stocks = vec![Stock::new("V", "Vulyenne")];
+    let initial_stocks = vec![(Symbol::try_from("V").expect("`V` should be a valid symbol"), Stock::new("Vulyenne"))];
     market.extend_stocks(initial_stocks.into_iter());
 
     let mut tick_interval = time::interval(time::Duration::from_millis(TICK_INTERVAL_MILLISECS));
@@ -139,41 +139,61 @@ async fn resolve_query(id: usize, query: Query, connections: &mut HashMap<usize,
             unreachable!("Connection should already have been handled.");
         }
         Query::Buy(symbol, order) => {
-            if let Some(stock) = market.get_stock_mut(&symbol) {
-                stock.add_buy_order(order);
-                socket_tx.send(QueryResponse::OrderPosted).await?;
+            if let Ok(symbol) = Symbol::try_from(&symbol) {
+                if let Some(stock) = market.get_stock_mut(&symbol) {
+                    stock.add_buy_order(order);
+                    socket_tx.send(QueryResponse::OrderPosted).await?;
+                } else {
+                    socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                }
             } else {
-                socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                socket_tx.send(QueryResponse::SymbolInvalid).await?;
             }
         }
         Query::Sell(symbol, order) => {
-            if let Some(stock) = market.get_stock_mut(&symbol) {
-                stock.add_sell_order(order);
-                socket_tx.send(QueryResponse::OrderPosted).await?;
+            if let Ok(symbol) = Symbol::try_from(&symbol) {
+                if let Some(stock) = market.get_stock_mut(&symbol) {
+                    stock.add_sell_order(order);
+                    socket_tx.send(QueryResponse::OrderPosted).await?;
+                } else {
+                    socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                }
             } else {
-                socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                socket_tx.send(QueryResponse::SymbolInvalid).await?;
             }
         }
         Query::Ohlc(symbol) => {
-            if let Some(stock) = market.get_stock(&symbol) {
-                let (open, high, low, close) = stock.get_ohlc();
-                socket_tx.send(QueryResponse::Ohlc(open, high, low, close)).await?;
+            if let Ok(symbol) = Symbol::try_from(&symbol) {
+                if let Some(stock) = market.get_stock(&symbol) {
+                    let (open, high, low, close) = stock.get_ohlc();
+                    socket_tx.send(QueryResponse::Ohlc(open, high, low, close)).await?;
+                } else {
+                    socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                }
             } else {
-                socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                socket_tx.send(QueryResponse::SymbolInvalid).await?;
             }
         }
         Query::BuyOrders(symbol) => {
-            if let Some(stock) = market.get_stock(&symbol) {
-                socket_tx.send(QueryResponse::QueriedOrders(stock.get_buy_orders())).await?;
+            if let Ok(symbol) = Symbol::try_from(&symbol) {
+                if let Some(stock) = market.get_stock(&symbol) {
+                    socket_tx.send(QueryResponse::QueriedOrders(stock.get_buy_orders())).await?;
+                } else {
+                    socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                }
             } else {
-                socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                socket_tx.send(QueryResponse::SymbolInvalid).await?;
             }
         }
         Query::SellOrders(symbol) => {
-            if let Some(stock) = market.get_stock(&symbol) {
-                socket_tx.send(QueryResponse::QueriedOrders(stock.get_sell_orders())).await?;
+            if let Ok(symbol) = Symbol::try_from(&symbol) {
+                if let Some(stock) = market.get_stock(&symbol) {
+                    socket_tx.send(QueryResponse::QueriedOrders(stock.get_sell_orders())).await?;
+                } else {
+                    socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                }
             } else {
-                socket_tx.send(QueryResponse::SymbolNotFound).await?;
+                socket_tx.send(QueryResponse::SymbolInvalid).await?;
             }
         }
     }

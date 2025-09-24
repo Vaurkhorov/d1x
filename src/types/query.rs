@@ -62,6 +62,8 @@ pub enum QueryResponse {
     // Errors
     /// The symbol provided was not found.
     SymbolNotFound,
+    /// The symbol provided was not valid: 1 <= len(symbol) <= 4
+    SymbolInvalid
 }
 
 impl QueryResponse {
@@ -94,6 +96,7 @@ impl QueryResponse {
                 )
             }
             QueryResponse::SymbolNotFound => r#"{"response": "symbol_not_found"}"#.to_string(),
+            QueryResponse::SymbolInvalid => r#"{"response": "symbol_invalid"}"#.to_string(),
         }
     }
 }

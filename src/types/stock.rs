@@ -6,12 +6,77 @@ const PRICE_PRECISION_FACTOR: f64 = 1e2;
 /// Number of unique prices that are checked for in the order book.
 const NO_OF_PRICES_QUERIED: usize = 5;
 
+#[derive(Clone, Copy, Hash, PartialEq, Eq, Debug)]
+pub struct Symbol {
+    chars: [char; 4]
+}
+
+impl std::fmt::Display for Symbol {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for c in self.chars {
+            if c == ' ' {
+                break;
+            }
+            write!(f, "{}", c)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl PartialEq<&str> for Symbol {
+    fn eq(&self, other: &&str) -> bool {
+        let mut l = self.chars.iter();
+        let mut r = other.chars();
+        
+        loop {
+            let lc = l.next().map(|c| *c);
+            let rc = r.next();
+            if lc.is_none() && rc.is_none() {
+                break true;
+            } else if lc != rc {
+                break false;
+            }
+        }
+    }
+}
+
+impl TryFrom<&str> for Symbol {
+    type Error = ();
+    
+    fn try_from(s: &str) -> Result<Self, ()> {
+        if (s.len() < 1) || (s.len() > 4) {
+            Err(())
+        } else {
+            let mut chars = [' '; 4];
+            for i in 0..4 {
+                if let Some(c) = s.chars().nth(i) {
+                    if c == ' ' {
+                        break;
+                    }
+                    chars[i] = c;
+                } else {
+                    break;
+                }
+            }
+
+            Ok(Self {
+                chars
+            })
+        }
+    }
+}
+
+impl TryFrom<&String> for Symbol {
+    type Error = ();
+    
+    fn try_from(value: &String) -> Result<Self, ()> {
+        (&value[..]).try_into()
+    }
+}
+
 /// Holds details for a stock and its orders.
 pub struct Stock {
-    /// The symbol of the stock (e.g., "ORT").
-    ///
-    /// This is used for querying the stock, and so must be unique.
-    symbol: String,
     /// The full name of the stock (e.g., "Orchard de Rosa et Tulipan")
     name: String,
     /// Buy orders for the stock.
@@ -24,19 +89,13 @@ pub struct Stock {
 
 impl Stock {
     /// Creates a new stock with the given symbol and name.
-    pub fn new(symbol: &str, name: &str) -> Self {
+    pub fn new(name: &str) -> Self {
         Self {
-            symbol: symbol.to_string(),
             name: name.to_string(),
             buy_orders: Vec::new(),
             sell_orders: Vec::new(),
             ohlc: Ohlc::new(),
         }
-    }
-
-    /// Returns the symbol of the stock.
-    pub fn get_symbol(&self) -> &str {
-        &self.symbol
     }
 
     /// Returns the name of the stock.
@@ -316,7 +375,7 @@ mod tests {
     /// Tests trade resolution, checking the returned logs and stored pending orders.
     #[test]
     fn test_resolve_trade() {
-        let mut stock = Stock::new("ORT", "Orchard de Rosa et Tulipan");
+        let mut stock = Stock::new("Orchard de Rosa et Tulipan");
         let buy_order = Order::new(1, 150.5, 10);
         let sell_order = Order::new(2, 150.0, 5);
 
@@ -354,7 +413,7 @@ mod tests {
     /// Tests buy queries.
     #[test]
     fn test_query_buy_orders() {
-        let mut stock = Stock::new("ORT", "Orchard de Rosa et Tulipan");
+        let mut stock = Stock::new("Orchard de Rosa et Tulipan");
         stock.add_buy_order(Order::new(1, 150.0, 10));
         stock.add_buy_order(Order::new(2, 155.0, 5));
         stock.add_buy_order(Order::new(3, 150.0, 15));
@@ -367,7 +426,7 @@ mod tests {
 
     #[test]
     fn test_query_sell_orders() {
-        let mut stock = Stock::new("ORT", "Orchard de Rosa et Tulipan");
+        let mut stock = Stock::new("Orchard de Rosa et Tulipan");
         stock.add_sell_order(Order::new(1, 145.0, 10));
         stock.add_sell_order(Order::new(2, 140.0, 5));
         stock.add_sell_order(Order::new(3, 145.0, 15));
